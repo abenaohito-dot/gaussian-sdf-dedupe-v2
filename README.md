@@ -39,7 +39,7 @@ The v2.0 comparison engine and Gaussian provenance checks were developed as an i
 
 ## Large batches (v2.0.2)
 
-For hundreds of Gaussian logs, upload ZIP archive(s), up to 100 MB per archive. Members are copied to a generated temporary path one at a time and deleted after conversion/audit. Expanded ZIP inputs are not accumulated in RAM. Large raw uploads are blocked before processing; use ZIP instead.
+For hundreds of Gaussian logs, upload ZIP archive(s), up to 200 MB per archive. Members are copied to a generated temporary path one at a time and deleted after conversion/audit. Expanded ZIP inputs are not accumulated in RAM. Large raw uploads are blocked before processing; use ZIP instead.
 
 The UI shows reading, comparison and output stages with counts and elapsed time. The hosted app stores only the selected representative evidence for each input, while evaluating all candidate comparisons needed for the same decisions. The JSON declares its evidence scope and total comparison count. The local CLI can still collect full pair evidence.
 

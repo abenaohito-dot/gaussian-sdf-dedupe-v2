@@ -4,7 +4,7 @@ from pathlib import PurePosixPath
 import shutil
 import zipfile
 
-MAX_MEMBER_BYTES = 100 * 1024 * 1024
+MAX_MEMBER_BYTES = 200 * 1024 * 1024
 
 def supported(info):
     path=PurePosixPath(info.filename)
@@ -20,7 +20,7 @@ def inventory(uploads):
                 if not members: raise ValueError(f'{upload.name}: no .log or .sdf files found in ZIP')
                 for info in members:
                     if info.flag_bits & 1: raise ValueError(f'{upload.name}: encrypted ZIP members are not supported')
-                    if info.file_size>MAX_MEMBER_BYTES: raise ValueError(f'{info.filename}: expanded file exceeds 100 MB; split the input file')
+                    if info.file_size>MAX_MEMBER_BYTES: raise ValueError(f'{info.filename}: expanded file exceeds 200 MB; split the input file')
                 total+=len(members)
                 needs_obabel |= any(PurePosixPath(i.filename).suffix.lower()=='.log' for i in members)
         else:

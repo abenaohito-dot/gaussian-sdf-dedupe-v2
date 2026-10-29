@@ -28,7 +28,7 @@ st.set_page_config(
 # =========================
 # App metadata
 # =========================
-APP_VERSION = "2.0.2"
+APP_VERSION = "2.0.3"
 
 DEVELOPER_INFO = {
     "name": "Ken-ichi Nakashima",
@@ -614,14 +614,15 @@ uploaded_files = st.file_uploader(
     texts["upload_files"],
     type=["log", "sdf", "zip"],
     accept_multiple_files=True,
-    key=f"batch_input_{st.session_state.upload_revision}"
+    key=f"batch_input_{st.session_state.upload_revision}",
+    max_upload_size=200
 )
 
 st.button("Clear uploaded files", on_click=clear_uploads)
 uploaded_bytes = sum(getattr(f, 'size', len(f.getbuffer()) if hasattr(f, 'getbuffer') else 0) for f in (uploaded_files or []))
 large_raw_batch = uploaded_bytes > 150 * 1024 * 1024 and any(Path(f.name).suffix.lower() != '.zip' for f in (uploaded_files or []))
 if large_raw_batch:
-    st.warning("This uncompressed upload is too large for reliable processing on this server. Clear uploaded files, then upload ZIP archive(s) instead. Each archive can be up to 100 MB.")
+    st.warning("This uncompressed upload is too large for reliable processing on this server. Clear uploaded files, then upload ZIP archive(s) instead. Each archive can be up to 200 MB.")
 run_button = st.button(texts["run_button"], type="primary", disabled=large_raw_batch)
 
 # =========================
