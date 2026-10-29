@@ -1,4 +1,4 @@
-# Gaussian / SDF Dedupe App Ver.2.0
+# Gaussian / SDF Dedupe App Ver.2.0.2
 
 An independent Streamlit app for conservative conformer deduplication in natural products chemistry. Derived from Ken-ichi Nakashima's Gaussian / SDF Dedupe App v1.1 at https://github.com/nakashima-art/gaussian-sdf-dedupe-app. The original repository is unchanged.
 
@@ -36,3 +36,11 @@ Uploads are processed by the hosting server in temporary files. Download the out
 Original developer: Ken-ichi Nakashima, Aichi-Gakuin University, School of Pharmacy, Laboratory of Natural Resources.
 
 The v2.0 comparison engine and Gaussian provenance checks were developed as an independent local extension at the user's request. See `PROVENANCE.md` for the original source revision. No new license is asserted for the upstream-derived code.
+
+## Large batches (v2.0.2)
+
+For hundreds of Gaussian logs, upload ZIP archive(s), up to 100 MB per archive. Members are copied to a generated temporary path one at a time and deleted after conversion/audit. Expanded ZIP inputs are not accumulated in RAM. Large raw uploads are blocked before processing; use ZIP instead.
+
+The UI shows reading, comparison and output stages with counts and elapsed time. The hosted app stores only the selected representative evidence for each input, while evaluating all candidate comparisons needed for the same decisions. The JSON declares its evidence scope and total comparison count. The local CLI can still collect full pair evidence.
+
+Validation on 203 structures with 20,503 evaluated comparisons reduced stored JSON from 29.155 MB to 0.272 MB; peak process RSS in this local benchmark fell from 264.6 MB to 79.2 MB (excluding uploaded research logs and Streamlit). These measurements do not guarantee that every dataset will fit within the hosting service's resource limits.

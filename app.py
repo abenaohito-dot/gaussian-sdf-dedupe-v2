@@ -1,8 +1,10 @@
 import streamlit as st
 import json
+import time
 from dataclasses import asdict
 from engine import Thresholds, deduplicate
 from gaussian_audit import annotate_gaussian
+from batch_io import inventory, iter_inputs
 import pandas as pd
 import tempfile
 import subprocess
@@ -26,7 +28,7 @@ st.set_page_config(
 # =========================
 # App metadata
 # =========================
-APP_VERSION = "2.0"
+APP_VERSION = "2.0.2"
 
 DEVELOPER_INFO = {
     "name": "Ken-ichi Nakashima",
@@ -76,7 +78,7 @@ COMMON_SDF_ENERGY_PROPS = [
 # =========================
 # UI text
 # =========================
-UI_TEXT = {'en': {'language_selector': 'Language', 'title': 'Gaussian / SDF Dedupe App', 'caption': f'Ver. {APP_VERSION}', 'description': 'Convert Gaussian logs, read conformer SDF files, and identify duplicates using atom mappings, RMSD, OH orientation, torsions, ring puckering and energy checks.', 'info': 'This app supports Gaussian .log files and conformer .sdf files (e.g., CONFLEX output). For SDF input, select the energy property and unit appropriately. If you mix Gaussian and SDF files in one run, energy ranking is only meaningful when the energy scales are comparable.', 'settings': 'Settings', 'developer_info': 'Developer information', 'developer_name': 'Name', 'developer_affiliation': 'Affiliation', 'log_energy_header': 'Gaussian .log settings', 'energy_to_extract': 'Energy to extract from Gaussian .log', 'scf': 'SCF', 'free_energy': 'Free Energy', 'sdf_energy_header': 'SDF settings', 'sdf_energy_mode': 'SDF energy property', 'auto_detect': 'Auto-detect common energy property', 'manual_property': 'Specify property name manually', 'sdf_property_name': 'SDF property name', 'sdf_property_hint': 'Examples: Energy, MMFF94 Energy, CONFLEX Energy', 'sdf_energy_unit': 'SDF energy unit', 'hartree': 'Hartree', 'kcal_mol': 'kcal/mol', 'kj_mol': 'kJ/mol', 'unknown_unit': 'Unknown (do not calculate relative energy)', 'symmetry_header': 'RMSD settings', 'symmetry_handling': 'Symmetry handling', 'symmetric_present': 'Symmetric structure present', 'no_symmetric_concern': 'No symmetric structure concern', 'rmsd_getbestrms': 'RMSD method: GetBestRMS (symmetry-aware)', 'rmsd_alignmol': 'RMSD method: AlignMol (direct alignment)', 'rmsd_cutoff': 'RMSD cutoff (Å)', 'rmsd_cutoff_help': 'Screening band only; additional checks are required.', 'heavy_atom_rmsd': 'Use heavy-atom RMSD (remove H atoms for RMSD calculation)', 'clear_results': 'Clear results', 'upload_files': 'Upload Gaussian .log and/or conformer .sdf files', 'run_button': 'Run processing and filtering', 'need_file': 'Please upload at least one .log or .sdf file.', 'obabel_not_available': 'Open Babel is not available.', 'processing': 'Processing', 'conversion_finished': 'File processing finished.', 'no_valid_molecules': 'No valid structures could be loaded.', 'results': 'Results', 'uploaded_files_metric': 'Uploaded files', 'loaded_conformers_metric': 'Loaded conformers', 'kept_structures_metric': 'Structures kept', 'summary_table': 'Summary table', 'download_outputs': 'Download outputs', 'download_all': 'Download all_conformers.sdf', 'download_unique': 'Download unique_conformers.sdf', 'download_summary': 'Download summary.csv', 'show_details': 'Show processing details', 'no_details': 'No processing issues were recorded.', 'mixed_input_warning': 'Both Gaussian .log and SDF files are included. Representative selection is only meaningful when all uploaded energies are on a comparable scale.', 'status_kept': 'kept', 'status_removed_as_duplicate': 'removed as duplicate', 'status_energy_not_found': 'energy not found', 'status_conversion_failed': 'conversion failed', 'status_rdkit_read_failed': 'RDKit read failed', 'status_unsupported_file_type': 'unsupported file type', 'status_manual_property_not_found': 'specified SDF property not found'}}
+UI_TEXT = {'en': {'language_selector': 'Language', 'title': 'Gaussian / SDF Dedupe App', 'caption': f'Ver. {APP_VERSION}', 'description': 'Convert Gaussian logs, read conformer SDF files, and identify duplicates using atom mappings, RMSD, OH orientation, torsions, ring puckering and energy checks.', 'info': 'This app supports Gaussian .log files and conformer .sdf files (e.g., CONFLEX output). For SDF input, select the energy property and unit appropriately. If you mix Gaussian and SDF files in one run, energy ranking is only meaningful when the energy scales are comparable.', 'settings': 'Settings', 'developer_info': 'Developer information', 'developer_name': 'Name', 'developer_affiliation': 'Affiliation', 'log_energy_header': 'Gaussian .log settings', 'energy_to_extract': 'Energy to extract from Gaussian .log', 'scf': 'SCF', 'free_energy': 'Free Energy', 'sdf_energy_header': 'SDF settings', 'sdf_energy_mode': 'SDF energy property', 'auto_detect': 'Auto-detect common energy property', 'manual_property': 'Specify property name manually', 'sdf_property_name': 'SDF property name', 'sdf_property_hint': 'Examples: Energy, MMFF94 Energy, CONFLEX Energy', 'sdf_energy_unit': 'SDF energy unit', 'hartree': 'Hartree', 'kcal_mol': 'kcal/mol', 'kj_mol': 'kJ/mol', 'unknown_unit': 'Unknown (do not calculate relative energy)', 'symmetry_header': 'RMSD settings', 'symmetry_handling': 'Symmetry handling', 'symmetric_present': 'Symmetric structure present', 'no_symmetric_concern': 'No symmetric structure concern', 'rmsd_getbestrms': 'RMSD method: GetBestRMS (symmetry-aware)', 'rmsd_alignmol': 'RMSD method: AlignMol (direct alignment)', 'rmsd_cutoff': 'RMSD cutoff (Å)', 'rmsd_cutoff_help': 'Screening band only; additional checks are required.', 'heavy_atom_rmsd': 'Use heavy-atom RMSD (remove H atoms for RMSD calculation)', 'clear_results': 'Clear results', 'upload_files': 'Upload Gaussian .log, conformer .sdf, or ZIP archives', 'run_button': 'Run processing and filtering', 'need_file': 'Please upload at least one .log or .sdf file.', 'obabel_not_available': 'Open Babel is not available.', 'processing': 'Processing', 'conversion_finished': 'File processing finished.', 'no_valid_molecules': 'No valid structures could be loaded.', 'results': 'Results', 'uploaded_files_metric': 'Uploaded files', 'loaded_conformers_metric': 'Loaded conformers', 'kept_structures_metric': 'Structures kept', 'summary_table': 'Summary table', 'download_outputs': 'Download outputs', 'download_all': 'Download all_conformers.sdf', 'download_unique': 'Download unique_conformers.sdf', 'download_summary': 'Download summary.csv', 'show_details': 'Show processing details', 'no_details': 'No processing issues were recorded.', 'mixed_input_warning': 'Both Gaussian .log and SDF files are included. Representative selection is only meaningful when all uploaded energies are on a comparable scale.', 'status_kept': 'kept', 'status_removed_as_duplicate': 'removed as duplicate', 'status_energy_not_found': 'energy not found', 'status_conversion_failed': 'conversion failed', 'status_rdkit_read_failed': 'RDKit read failed', 'status_unsupported_file_type': 'unsupported file type', 'status_manual_property_not_found': 'specified SDF property not found'}}
 
 COLUMN_LABELS = {'en': {'source_label': 'source_label', 'source_file': 'source_file', 'input_type': 'input_type', 'record_index': 'record_index', 'energy_type': 'energy_type', 'energy_property': 'energy_property', 'energy_unit': 'energy_unit', 'energy_value': 'energy_value', 'relative_energy_kcal_mol': 'relative_energy_kcal_mol', 'rank_by_energy': 'rank_by_energy', 'status': 'status', 'duplicate_of': 'duplicate_of', 'rmsd_to_representative': 'rmsd_to_representative', 'normal_termination': 'normal_termination'}}
 
@@ -118,7 +120,10 @@ def check_obabel_available():
 
 
 def save_uploaded_file(uploaded_file, output_path: Path):
-    output_path.write_bytes(uploaded_file.getbuffer())
+    if hasattr(uploaded_file, 'save_to'):
+        uploaded_file.save_to(output_path)
+    else:
+        output_path.write_bytes(uploaded_file.getbuffer())
 
 
 def parse_float(value):
@@ -392,8 +397,11 @@ def convert_relative_energy_to_kcal(delta_value, unit):
 
 def deduplicate_molecules(mols, rmsd_cutoff=0.20, remove_hs_for_rmsd=True, rmsd_method="GetBestRMS"):
     cfg = Thresholds(heavy=rmsd_cutoff, **v2_settings)
-    kept, rows, pairs = deduplicate(mols, cfg, symmetry=rmsd_method == "GetBestRMS")
-    st.session_state.v2_pairwise = {"thresholds": asdict(cfg), "pairs": pairs}
+    def update(completed, total, comparisons, label, elapsed):
+        progress.progress(0.45 + 0.45 * completed / max(total, 1))
+        status_box.info(f"Step 2/3: Comparing conformers — {completed}/{total} processed, {comparisons:,} pair comparisons, {elapsed:.0f}s elapsed. Current: {label or 'preparing geometries'}")
+    kept, rows, pairs = deduplicate(mols, cfg, symmetry=rmsd_method == "GetBestRMS", progress_callback=update, evidence_mode="representatives")
+    st.session_state.v2_pairwise = {"thresholds": asdict(cfg), "evidence_scope": "Selected representative comparison per input; every candidate comparison was evaluated", "comparisons_evaluated": sum(row['comparisons_evaluated'] for row in rows), "pairs": pairs}
     return kept, rows
 
 
@@ -442,9 +450,9 @@ def render_results(payload, lang, texts):
     col3.metric(texts["kept_structures_metric"], payload["kept_count"])
 
     st.subheader(texts["summary_table"])
-    st.dataframe(make_display_df(payload["summary_df"], lang, texts), use_container_width=True)
+    st.dataframe(make_display_df(payload["summary_df"], lang, texts), width="stretch")
 
-    st.download_button("Download pairwise evidence and atom mappings (JSON)", data=json.dumps(payload.get("pairwise", {}), ensure_ascii=False, indent=2), file_name="pairwise.json", mime="application/json")
+    st.download_button("Download representative evidence and atom mappings (JSON)", data=json.dumps(payload.get("pairwise", {}), ensure_ascii=False, indent=2), file_name="pairwise.json", mime="application/json")
     st.subheader(texts["download_outputs"])
     d1, d2, d3 = st.columns(3)
 
@@ -474,7 +482,7 @@ def render_results(payload, lang, texts):
     with st.expander(texts["show_details"]):
         details_df = payload.get("processing_logs_df")
         if details_df is not None and not details_df.empty:
-            st.dataframe(make_display_df(details_df, lang, texts), use_container_width=True)
+            st.dataframe(make_display_df(details_df, lang, texts), width="stretch")
         else:
             st.write(texts["no_details"])
 
@@ -587,255 +595,293 @@ with st.sidebar:
     if st.button(texts["clear_results"]):
         st.session_state.results_ready = False
         st.session_state.result_payload = None
+        st.session_state.pop('v2_pairwise', None)
         st.rerun()
 
 # =========================
 # Main UI
 # =========================
+st.info("For large batches, upload ZIP archive(s) containing .log or .sdf files. ZIP members are processed one at a time to reduce memory use. Keep this tab open until processing completes.")
+if 'upload_revision' not in st.session_state: st.session_state.upload_revision = 0
+
+def clear_uploads():
+    st.session_state.upload_revision += 1
+    st.session_state.results_ready = False
+    st.session_state.result_payload = None
+    st.session_state.pop('v2_pairwise', None)
+
 uploaded_files = st.file_uploader(
     texts["upload_files"],
-    type=["log", "sdf"],
-    accept_multiple_files=True
+    type=["log", "sdf", "zip"],
+    accept_multiple_files=True,
+    key=f"batch_input_{st.session_state.upload_revision}"
 )
 
-run_button = st.button(texts["run_button"], type="primary")
+st.button("Clear uploaded files", on_click=clear_uploads)
+uploaded_bytes = sum(getattr(f, 'size', len(f.getbuffer()) if hasattr(f, 'getbuffer') else 0) for f in (uploaded_files or []))
+large_raw_batch = uploaded_bytes > 150 * 1024 * 1024 and any(Path(f.name).suffix.lower() != '.zip' for f in (uploaded_files or []))
+if large_raw_batch:
+    st.warning("This uncompressed upload is too large for reliable processing on this server. Clear uploaded files, then upload ZIP archive(s) instead. Each archive can be up to 100 MB.")
+run_button = st.button(texts["run_button"], type="primary", disabled=large_raw_batch)
 
 # =========================
 # Run
 # =========================
 if run_button:
-    if not uploaded_files:
-        st.error(texts["need_file"])
-        st.stop()
-
-    output_prefix = build_output_prefix(uploaded_files)
-
-    needs_obabel = any(Path(f.name).suffix.lower() == ".log" for f in uploaded_files)
-    if needs_obabel:
-        obabel_ok, obabel_msg = check_obabel_available()
-        if not obabel_ok:
-            st.error(texts["obabel_not_available"])
-            st.code(obabel_msg)
+    try:
+        st.session_state.results_ready = False
+        st.session_state.result_payload = None
+        st.session_state.pop('v2_pairwise', None)
+        run_started = time.monotonic()
+        if not uploaded_files:
+            st.error(texts["need_file"])
             st.stop()
-        st.success(obabel_msg)
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-        loaded_mols = []
-        processing_logs = []
-
-        progress = st.progress(0)
-        status_box = st.empty()
-
-        total_files = len(uploaded_files)
-        input_types_seen = set()
-
-        for i, uploaded_file in enumerate(uploaded_files, start=1):
-            status_box.write(f"{texts['processing']} {i}/{total_files}: `{uploaded_file.name}`")
-
-            suffix = Path(uploaded_file.name).suffix.lower()
-            file_path = tmpdir / Path(uploaded_file.name).name
-            save_uploaded_file(uploaded_file, file_path)
-
-            if suffix == ".log":
-                input_types_seen.add("log")
-
-                normal_term = check_normal_termination(file_path)
-                energy_value = extract_last_scf_energy(file_path) if log_energy_type_label == "SCF" else extract_gibbs_energy(file_path)
-
-                sdf_path = tmpdir / f"{file_path.stem}.sdf"
-                conv_success, conv_stdout, conv_stderr = convert_log_to_sdf(file_path, sdf_path)
-
-                if not conv_success:
-                    processing_logs.append({
-                        "source_label": uploaded_file.name,
-                        "source_file": uploaded_file.name,
-                        "input_type": "log",
-                        "record_index": 1,
-                        "energy_type": log_energy_type_label,
-                        "energy_property": "",
-                        "energy_unit": "Hartree",
-                        "energy_value": energy_value,
-                        "relative_energy_kcal_mol": None,
-                        "rank_by_energy": None,
-                        "status": "conversion_failed",
-                        "duplicate_of": "",
-                        "rmsd_to_representative": None,
-                        "normal_termination": normal_term,
-                    })
-                    progress.progress(i / total_files)
-                    continue
-
-                mol = read_first_mol_from_sdf(sdf_path)
-                if mol is None:
-                    processing_logs.append({
-                        "source_label": uploaded_file.name,
-                        "source_file": uploaded_file.name,
-                        "input_type": "log",
-                        "record_index": 1,
-                        "energy_type": log_energy_type_label,
-                        "energy_property": "",
-                        "energy_unit": "Hartree",
-                        "energy_value": energy_value,
-                        "relative_energy_kcal_mol": None,
-                        "rank_by_energy": None,
-                        "status": "rdkit_read_failed",
-                        "duplicate_of": "",
-                        "rmsd_to_representative": None,
-                        "normal_termination": normal_term,
-                    })
-                    progress.progress(i / total_files)
-                    continue
-
-                annotate_mol(
-                    mol=mol,
-                    source_file=uploaded_file.name,
-                    source_label=uploaded_file.name,
-                    input_type="log",
-                    record_index=1,
-                    energy_value=energy_value,
-                    energy_type=log_energy_type_label,
-                    energy_unit="Hartree",
-                    energy_source=log_energy_type_label,
-                    normal_termination=normal_term,
-                )
-                annotate_gaussian(mol, file_path)
-                loaded_mols.append(mol)
-
-            elif suffix == ".sdf":
-                input_types_seen.add("sdf")
-
-                mols_in_sdf = read_all_mols_from_sdf(file_path)
-                if not mols_in_sdf:
-                    processing_logs.append({
-                        "source_label": uploaded_file.name,
-                        "source_file": uploaded_file.name,
-                        "input_type": "sdf",
-                        "record_index": "",
-                        "energy_type": "SDF",
-                        "energy_property": sdf_manual_property_name if sdf_energy_mode == "manual" else "",
-                        "energy_unit": sdf_energy_unit,
-                        "energy_value": None,
-                        "relative_energy_kcal_mol": None,
-                        "rank_by_energy": None,
-                        "status": "rdkit_read_failed",
-                        "duplicate_of": "",
-                        "rmsd_to_representative": None,
-                        "normal_termination": "",
-                    })
-                    progress.progress(i / total_files)
-                    continue
-
-                for idx, mol in enumerate(mols_in_sdf, start=1):
-                    if mol is None:
-                        processing_logs.append({"source_label": f"{uploaded_file.name} [record {idx}]", "source_file": uploaded_file.name, "record_index": idx, "status": "rdkit_read_failed", "reason": "Unreadable SDF record; check source file"})
-                        continue
-                    energy_value, prop_name, extract_status = extract_energy_from_sdf_mol(
-                        mol,
-                        mode=sdf_energy_mode,
-                        manual_property_name=sdf_manual_property_name,
-                    )
-
-                    source_label = f"{uploaded_file.name} [record {idx}]"
-
-                    annotate_mol(
-                        mol=mol,
-                        source_file=uploaded_file.name,
-                        source_label=source_label,
-                        input_type="sdf",
-                        record_index=idx,
-                        energy_value=energy_value,
-                        energy_type="SDF",
-                        energy_unit=sdf_energy_unit,
-                        energy_source=prop_name or (sdf_manual_property_name if sdf_energy_mode == "manual" else ""),
-                        normal_termination="",
-                    )
-                    mol.SetProp("CalculationContext", sdf_context.strip() or f"sdf-file:{uploaded_file.name}")
-                    loaded_mols.append(mol)
-
-                    if extract_status == "manual_property_not_found":
+    
+        output_prefix = build_output_prefix(uploaded_files)
+    
+        total_input_files, needs_obabel = inventory(uploaded_files)
+        if needs_obabel:
+            obabel_ok, obabel_msg = check_obabel_available()
+            if not obabel_ok:
+                st.error(texts["obabel_not_available"])
+                st.code(obabel_msg)
+                st.stop()
+            st.success(obabel_msg)
+    
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            loaded_mols = []
+            processing_logs = []
+    
+            progress = st.progress(0)
+            status_box = st.empty()
+    
+            total_files = total_input_files
+            input_types_seen = set()
+    
+            for i, uploaded_file in enumerate(iter_inputs(uploaded_files), start=1):
+                status_box.info(f"Step 1/3: Reading and converting file {i}/{total_files}: {uploaded_file.name} ({time.monotonic()-run_started:.0f}s elapsed)")
+    
+                suffix = Path(uploaded_file.name).suffix.lower()
+                file_path = tmpdir / f"input_{i:05d}{suffix}"
+                try:
+                    save_uploaded_file(uploaded_file, file_path)
+        
+                    if suffix == ".log":
+                        input_types_seen.add("log")
+        
+                        normal_term = check_normal_termination(file_path)
+                        energy_value = extract_last_scf_energy(file_path) if log_energy_type_label == "SCF" else extract_gibbs_energy(file_path)
+        
+                        sdf_path = tmpdir / f"converted_{i:05d}.sdf"
+                        conv_success, conv_stdout, conv_stderr = convert_log_to_sdf(file_path, sdf_path)
+        
+                        if not conv_success:
+                            processing_logs.append({
+                                "source_label": uploaded_file.name,
+                                "source_file": uploaded_file.name,
+                                "input_type": "log",
+                                "record_index": 1,
+                                "energy_type": log_energy_type_label,
+                                "energy_property": "",
+                                "energy_unit": "Hartree",
+                                "energy_value": energy_value,
+                                "relative_energy_kcal_mol": None,
+                                "rank_by_energy": None,
+                                "status": "conversion_failed",
+                                "duplicate_of": "",
+                                "rmsd_to_representative": None,
+                                "normal_termination": normal_term,
+                            })
+                            progress.progress(0.45 * i / total_files)
+                            continue
+        
+                        mol = read_first_mol_from_sdf(sdf_path)
+                        if mol is None:
+                            processing_logs.append({
+                                "source_label": uploaded_file.name,
+                                "source_file": uploaded_file.name,
+                                "input_type": "log",
+                                "record_index": 1,
+                                "energy_type": log_energy_type_label,
+                                "energy_property": "",
+                                "energy_unit": "Hartree",
+                                "energy_value": energy_value,
+                                "relative_energy_kcal_mol": None,
+                                "rank_by_energy": None,
+                                "status": "rdkit_read_failed",
+                                "duplicate_of": "",
+                                "rmsd_to_representative": None,
+                                "normal_termination": normal_term,
+                            })
+                            progress.progress(0.45 * i / total_files)
+                            continue
+        
+                        annotate_mol(
+                            mol=mol,
+                            source_file=uploaded_file.name,
+                            source_label=uploaded_file.name,
+                            input_type="log",
+                            record_index=1,
+                            energy_value=energy_value,
+                            energy_type=log_energy_type_label,
+                            energy_unit="Hartree",
+                            energy_source=log_energy_type_label,
+                            normal_termination=normal_term,
+                        )
+                        annotate_gaussian(mol, file_path)
+                        loaded_mols.append(mol)
+        
+                    elif suffix == ".sdf":
+                        input_types_seen.add("sdf")
+        
+                        mols_in_sdf = read_all_mols_from_sdf(file_path)
+                        if not mols_in_sdf:
+                            processing_logs.append({
+                                "source_label": uploaded_file.name,
+                                "source_file": uploaded_file.name,
+                                "input_type": "sdf",
+                                "record_index": "",
+                                "energy_type": "SDF",
+                                "energy_property": sdf_manual_property_name if sdf_energy_mode == "manual" else "",
+                                "energy_unit": sdf_energy_unit,
+                                "energy_value": None,
+                                "relative_energy_kcal_mol": None,
+                                "rank_by_energy": None,
+                                "status": "rdkit_read_failed",
+                                "duplicate_of": "",
+                                "rmsd_to_representative": None,
+                                "normal_termination": "",
+                            })
+                            progress.progress(0.45 * i / total_files)
+                            continue
+        
+                        for idx, mol in enumerate(mols_in_sdf, start=1):
+                            if mol is None:
+                                processing_logs.append({"source_label": f"{uploaded_file.name} [record {idx}]", "source_file": uploaded_file.name, "record_index": idx, "status": "rdkit_read_failed", "reason": "Unreadable SDF record; check source file"})
+                                continue
+                            energy_value, prop_name, extract_status = extract_energy_from_sdf_mol(
+                                mol,
+                                mode=sdf_energy_mode,
+                                manual_property_name=sdf_manual_property_name,
+                            )
+        
+                            source_label = f"{uploaded_file.name} [record {idx}]"
+        
+                            annotate_mol(
+                                mol=mol,
+                                source_file=uploaded_file.name,
+                                source_label=source_label,
+                                input_type="sdf",
+                                record_index=idx,
+                                energy_value=energy_value,
+                                energy_type="SDF",
+                                energy_unit=sdf_energy_unit,
+                                energy_source=prop_name or (sdf_manual_property_name if sdf_energy_mode == "manual" else ""),
+                                normal_termination="",
+                            )
+                            mol.SetProp("CalculationContext", sdf_context.strip() or f"sdf-file:{uploaded_file.name}")
+                            loaded_mols.append(mol)
+        
+                            if extract_status == "manual_property_not_found":
+                                processing_logs.append({
+                                    "source_label": source_label,
+                                    "source_file": uploaded_file.name,
+                                    "input_type": "sdf",
+                                    "record_index": idx,
+                                    "energy_type": "SDF",
+                                    "energy_property": sdf_manual_property_name,
+                                    "energy_unit": sdf_energy_unit,
+                                    "energy_value": None,
+                                    "relative_energy_kcal_mol": None,
+                                    "rank_by_energy": None,
+                                    "status": "manual_property_not_found",
+                                    "duplicate_of": "",
+                                    "rmsd_to_representative": None,
+                                    "normal_termination": "",
+                                })
+        
+                    else:
                         processing_logs.append({
-                            "source_label": source_label,
+                            "source_label": uploaded_file.name,
                             "source_file": uploaded_file.name,
-                            "input_type": "sdf",
-                            "record_index": idx,
-                            "energy_type": "SDF",
-                            "energy_property": sdf_manual_property_name,
-                            "energy_unit": sdf_energy_unit,
+                            "input_type": "",
+                            "record_index": "",
+                            "energy_type": "",
+                            "energy_property": "",
+                            "energy_unit": "",
                             "energy_value": None,
                             "relative_energy_kcal_mol": None,
                             "rank_by_energy": None,
-                            "status": "manual_property_not_found",
+                            "status": "unsupported_file_type",
                             "duplicate_of": "",
                             "rmsd_to_representative": None,
                             "normal_termination": "",
                         })
+        
+                    progress.progress(0.45 * i / total_files)
+        
+                except Exception as file_error:
+                    processing_logs.append({"source_label": uploaded_file.name, "source_file": uploaded_file.name, "status": "processing_failed", "reason": str(file_error)})
+                finally:
+                    file_path.unlink(missing_ok=True)
+                    (tmpdir / f"converted_{i:05d}.sdf").unlink(missing_ok=True)
 
-            else:
-                processing_logs.append({
-                    "source_label": uploaded_file.name,
-                    "source_file": uploaded_file.name,
-                    "input_type": "",
-                    "record_index": "",
-                    "energy_type": "",
-                    "energy_property": "",
-                    "energy_unit": "",
-                    "energy_value": None,
-                    "relative_energy_kcal_mol": None,
-                    "rank_by_energy": None,
-                    "status": "unsupported_file_type",
-                    "duplicate_of": "",
-                    "rmsd_to_representative": None,
-                    "normal_termination": "",
-                })
-
-            progress.progress(i / total_files)
-
-        status_box.write(texts["conversion_finished"])
-
-        if not loaded_mols:
-            st.error(texts["no_valid_molecules"])
-            if processing_logs:
-                st.dataframe(make_display_df(pd.DataFrame(processing_logs), lang, texts), use_container_width=True)
-            st.stop()
-
-        all_sdf_bytes = None
-
-        kept_mols, summary_rows = deduplicate_molecules(
-            mols=loaded_mols,
-            rmsd_cutoff=rmsd_cutoff,
-            remove_hs_for_rmsd=remove_hs_for_rmsd,
-            rmsd_method=rmsd_method,
-        )
-
-        all_sdf_bytes = write_sdf_bytes(loaded_mols)
-        unique_sdf_bytes = write_sdf_bytes(kept_mols)
-
-        summary_rows.extend(processing_logs)
-
-        summary_df, summary_csv_bytes = make_summary_csv_bytes(summary_rows)
-        if not summary_df.empty:
-            summary_df = summary_df.sort_values(
-                by=["status", "rank_by_energy", "source_label"],
-                na_position="last"
-            ).reset_index(drop=True)
-
-        processing_logs_df = pd.DataFrame(processing_logs) if processing_logs else pd.DataFrame()
-
-        st.session_state.result_payload = {
-            "pairwise": st.session_state.v2_pairwise,
-            "uploaded_count": len(uploaded_files),
-            "loaded_count": len(loaded_mols),
-            "kept_count": len(kept_mols),
-            "summary_df": summary_df,
-            "all_sdf_bytes": all_sdf_bytes,
-            "unique_sdf_bytes": unique_sdf_bytes,
-            "summary_csv_bytes": summary_csv_bytes,
-            "processing_logs_df": processing_logs_df,
-            "mixed_input_types": len(input_types_seen) > 1,
-            "output_prefix": output_prefix,
-        }
-        st.session_state.results_ready = True
+            status_box.info(f"Step 2/3: Preparing comparison of {len(loaded_mols)} conformers. All input files have been read.")
+    
+            if not loaded_mols:
+                st.error(texts["no_valid_molecules"])
+                if processing_logs:
+                    st.dataframe(make_display_df(pd.DataFrame(processing_logs), lang, texts), width="stretch")
+                st.stop()
+    
+            all_sdf_bytes = None
+    
+            kept_mols, summary_rows = deduplicate_molecules(
+                mols=loaded_mols,
+                rmsd_cutoff=rmsd_cutoff,
+                remove_hs_for_rmsd=remove_hs_for_rmsd,
+                rmsd_method=rmsd_method,
+            )
+    
+            progress.progress(0.92)
+            status_box.info("Step 3/3: Generating result table and downloads...")
+            all_sdf_bytes = write_sdf_bytes(loaded_mols)
+            unique_sdf_bytes = write_sdf_bytes(kept_mols)
+    
+            summary_rows.extend(processing_logs)
+    
+            summary_df, summary_csv_bytes = make_summary_csv_bytes(summary_rows)
+            if not summary_df.empty:
+                summary_df = summary_df.sort_values(
+                    by=["status", "rank_by_energy", "source_label"],
+                    na_position="last"
+                ).reset_index(drop=True)
+    
+            processing_logs_df = pd.DataFrame(processing_logs) if processing_logs else pd.DataFrame()
+    
+            st.session_state.result_payload = {
+                "pairwise": st.session_state.v2_pairwise,
+                "uploaded_count": total_input_files,
+                "loaded_count": len(loaded_mols),
+                "kept_count": len(kept_mols),
+                "summary_df": summary_df,
+                "all_sdf_bytes": all_sdf_bytes,
+                "unique_sdf_bytes": unique_sdf_bytes,
+                "summary_csv_bytes": summary_csv_bytes,
+                "processing_logs_df": processing_logs_df,
+                "mixed_input_types": len(input_types_seen) > 1,
+                "output_prefix": output_prefix,
+            }
+            st.session_state.results_ready = True
+            progress.progress(1.0)
+            status_box.success(f"Completed: {len(loaded_mols)} conformers processed, {len(kept_mols)} kept, {len(loaded_mols)-len(kept_mols)} confirmed duplicates excluded ({time.monotonic()-run_started:.0f}s). Results and downloads are below.")
+    except Exception as error:
+        st.session_state.results_ready = False
+        st.session_state.result_payload = None
+        st.error("Processing stopped before results were ready. No structures were deleted from your input files. See the error details below.")
+        with st.expander("Processing error details", expanded=True):
+            st.exception(error)
 
 # render from session state
 if st.session_state.results_ready and st.session_state.result_payload is not None:
