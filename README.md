@@ -1,2 +1,38 @@
-# gaussian-sdf-dedupe-v2
-Conservative Gaussian/SDF conformer deduplication for natural products chemistry — independent v2.0
+# Gaussian / SDF Dedupe App Ver.2.0
+
+An independent Streamlit app for conservative conformer deduplication in natural products chemistry. Derived from Ken-ichi Nakashima's Gaussian / SDF Dedupe App v1.1 at https://github.com/nakashima-art/gaussian-sdf-dedupe-app. The original repository is unchanged.
+
+Supports Gaussian .log conversion with Open Babel, multi-record SDF input (including CONFLEX), SCF/free-energy extraction, energy ranking within comparable calculation contexts, and SDF/CSV downloads. The interface and output labels are in English.
+
+## Decisions
+
+- **Confirmed duplicate**: A valid complete atom mapping passes every confirmation band, with comparable energies and verified Gaussian optimization/geometry where applicable. Only this class is excluded.
+- **Distinct conformer**: Every enumerated valid mapping exceeds a geometric separation band. Retained.
+- **Needs review**: Ambiguous geometry, missing information, incomparable energies, unverified optimization, mapping limits, or other uncertainty. Retained. The first representative also has this status because no pair comparison is available.
+
+The comparison uses consistent stereochemistry-preserving atom mappings for heavy-atom alignment, all-atom RMSD, OH directions, proper and OH torsions, and cyclobutane ring torsions/signed out-of-plane displacement. No reflection is allowed. Hydrogen permutations are limited to the corresponding bonded atom, respecting isotopes. Missing energies never cause a structure to be omitted.
+
+Thresholds are provisional and editable. Validate them against known conformers for your compound, especially subtle ring-puckering differences. An optimization converging does not establish a minimum without vibrational analysis. Multi-job Gaussian logs are retained for review unless the optimization/geometry correspondence can be verified; single-job logs are preferred.
+
+## Deploy on Streamlit Community Cloud
+
+Repository branch: `main`; entry point: `app.py`; Python: **3.13**. `requirements.txt` supplies Python dependencies and `packages.txt` installs Open Babel. No secrets are required.
+
+## Run locally
+
+Install Python 3.13 and Open Babel (`obabel` on PATH), then:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+Uploads are processed by the hosting server in temporary files. Download the outputs from the app. This deployment repository contains application source and configuration only; research validation inputs and their derived data are kept outside the deployment package.
+
+## Attribution
+
+Original developer: Ken-ichi Nakashima, Aichi-Gakuin University, School of Pharmacy, Laboratory of Natural Resources.
+
+The v2.0 comparison engine and Gaussian provenance checks were developed as an independent local extension at the user's request. See `PROVENANCE.md` for the original source revision. No new license is asserted for the upstream-derived code.
