@@ -2,4 +2,4 @@
 gatherUsageStats = false
 
 [server]
-maxUploadSize = 100
+maxUploadSize = 200
